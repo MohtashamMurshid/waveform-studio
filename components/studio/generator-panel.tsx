@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useStudio, useStudioDispatch } from "@/lib/studio-context";
+import { createStudioEffect } from "@/lib/studio-io";
 import {
   generateWaveform,
   defaultGeneratorParams,
@@ -47,20 +48,16 @@ export function GeneratorPanel() {
     dispatch({
       type: "ADD_EFFECT",
       effect: {
-        waveform: {
-          id: crypto.randomUUID(),
-          name: `gen_${params.shape}_${params.frequency}Hz`,
-          samples,
-          sampleRate: params.sampleRate,
-        },
-        chain: [],
-        regions: [],
-        remastered: null,
+        ...createStudioEffect(
+          {
+            id: crypto.randomUUID(),
+            name: `gen_${params.shape}_${params.frequency}Hz`,
+            samples,
+            sampleRate: params.sampleRate,
+          },
+          state.globalDefaultPlayRateHz,
+        ),
         familyTag: "generated",
-        playRateHz: state.globalDefaultPlayRateHz,
-        notes: "",
-        selected: false,
-        remasterInfo: null,
       },
     });
     setOpen(false);
@@ -148,12 +145,10 @@ export function GeneratorPanel() {
             </label>
             <Slider
               min={10}
-              max={8000}
+              max={24000}
               step={10}
               value={[params.duration]}
-              onValueChange={([v]) =>
-                setParams((p) => ({ ...p, duration: v }))
-              }
+              onValueChange={([v]) => setParams((p) => ({ ...p, duration: v }))}
               className="flex-1"
             />
             <span className="w-16 text-right text-xs tabular-nums">
@@ -170,9 +165,7 @@ export function GeneratorPanel() {
               max={1}
               step={0.01}
               value={[params.phase]}
-              onValueChange={([v]) =>
-                setParams((p) => ({ ...p, phase: v }))
-              }
+              onValueChange={([v]) => setParams((p) => ({ ...p, phase: v }))}
               className="flex-1"
             />
             <span className="w-12 text-right text-xs tabular-nums">

@@ -1,7 +1,6 @@
 import type { Region } from "./region";
-import { applyRegions } from "./region";
+import { renderTimelineRegions } from "./region";
 import type { TransformStep } from "./transforms";
-import { applyTransformChain } from "./transforms";
 import { computeStats, type WaveformStats } from "./stats";
 
 export interface RemasterResult {
@@ -11,59 +10,64 @@ export interface RemasterResult {
   remasteredStats: WaveformStats;
 }
 
-export function createEmptyRegionOverrides(): Region["overrides"] {
-  return {
-    gain: null,
-    smoothing: null,
-    deadzone: null,
-    envelope: null,
-  };
-}
-
 export function createDefaultRegion(
   sampleCount: number,
-  existingRegions: Region[]
+  existingRegions: Region[],
 ): Region {
   const index = existingRegions.length + 1;
-  const start = Math.floor(sampleCount * 0.25);
-  const end = Math.floor(sampleCount * 0.75);
+  const start = 0;
+  const end = sampleCount;
   return {
     id: crypto.randomUUID(),
-    name: `Region ${index}`,
+    name: `Clip ${index}`,
+    timelineStart: 0,
+    timelineLength: sampleCount,
     start,
     end,
-    crossfadeSamples: 20,
-    overrides: createEmptyRegionOverrides(),
+    crossfadeSamples: 0,
+    chain: [],
   };
 }
 
 export function sanitizeRegion(region: Region, sampleCount: number): Region {
-  const start = Math.max(0, Math.min(region.start, sampleCount));
-  const end = Math.max(start, Math.min(region.end, sampleCount));
+  const sourceSampleCount = region.sourceSamples?.length ?? sampleCount;
+  const start = Math.max(0, Math.min(region.start, sourceSampleCount));
+  const end = Math.max(start, Math.min(region.end, sourceSampleCount));
+  const timelineLength = Math.max(1, region.timelineLength ?? end - start);
   return {
     ...region,
     start,
     end,
-    crossfadeSamples: Math.max(0, Math.min(region.crossfadeSamples, Math.floor((end - start) / 2))),
+    timelineLength,
+    sourceSamples: region.sourceSamples
+      ? new Int8Array(region.sourceSamples)
+      : undefined,
+    crossfadeSamples: Math.max(
+      0,
+      Math.min(region.crossfadeSamples, Math.floor(timelineLength / 2)),
+    ),
   };
 }
 
 export function computeRemasteredWaveform(
   original: Int8Array,
   sampleRate: number,
-  chain: TransformStep[],
-  regions: Region[]
+  _chain: TransformStep[],
+  regions: Region[],
+  cachedOriginalStats?: WaveformStats,
 ): RemasterResult {
-  const originalStats = computeStats(original, sampleRate);
-  const { result: globalResult, clippedTotal: globalClipped } = applyTransformChain(
-    original,
-    chain,
-    sampleRate
-  );
+  const originalStats =
+    cachedOriginalStats ?? computeStats(original, sampleRate);
+  const globalResult = new Int8Array(original);
+  const globalClipped = 0;
   const sanitizedRegions = regions.map((region) =>
-    sanitizeRegion(region, globalResult.length)
+    sanitizeRegion(region, globalResult.length),
   );
-  const { result, clippedTotal: regionClipped } = applyRegions(globalResult, sanitizedRegions);
+  const { result, clippedTotal: regionClipped } = renderTimelineRegions(
+    globalResult,
+    sanitizedRegions,
+    sampleRate,
+  );
   return {
     result,
     clippedSamples: globalClipped + regionClipped,

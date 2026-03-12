@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getTimelineLength } from "@/lib/dsp/region";
 import { useMemo, useState } from "react";
 
 export function PropertiesPanel() {
@@ -14,12 +15,53 @@ export function PropertiesPanel() {
   const dispatch = useStudioDispatch();
   const effect = state.effects[state.activeEffectIndex];
   const [presetName, setPresetName] = useState("");
+  const [isEditingDuration, setIsEditingDuration] = useState(false);
+  const [durationMsInput, setDurationMsInput] = useState("");
   const currentFamilyTag = effect?.familyTag.trim() || "ungrouped";
   const familyPresets = useMemo(
     () =>
       state.presets.filter((preset) => preset.familyTag === currentFamilyTag),
-    [currentFamilyTag, state.presets]
+    [currentFamilyTag, state.presets],
   );
+  const timelineSampleCount = effect
+    ? Math.max(
+        effect.waveform.samples.length,
+        getTimelineLength(effect.regions, effect.waveform.samples.length),
+      )
+    : 0;
+  const currentDurationMs =
+    effect && effect.playRateHz > 0
+      ? (timelineSampleCount / effect.playRateHz) * 1000
+      : 0;
+
+  const currentDurationText =
+    currentDurationMs >= 100
+      ? currentDurationMs.toFixed(0)
+      : currentDurationMs >= 10
+        ? currentDurationMs.toFixed(1)
+        : currentDurationMs.toFixed(2);
+
+  const commitDurationMs = (exitEditing = true) => {
+    if (!effect) return;
+    const nextDurationMs = Number(durationMsInput || currentDurationText);
+    const fallbackText = currentDurationText;
+    if (!Number.isFinite(nextDurationMs) || nextDurationMs <= 0) {
+      setDurationMsInput(fallbackText);
+      if (exitEditing) setIsEditingDuration(false);
+      return;
+    }
+
+    const nextTimelineSampleCount = Math.max(
+      1,
+      Math.round((effect.playRateHz * nextDurationMs) / 1000),
+    );
+
+    dispatch({
+      type: "SET_TIMELINE_LENGTH_SAMPLES",
+      sampleCount: nextTimelineSampleCount,
+    });
+    if (exitEditing) setIsEditingDuration(false);
+  };
 
   if (!effect) {
     return (
@@ -67,6 +109,37 @@ export function PropertiesPanel() {
 
           <div className="px-2">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Duration
+            </span>
+            <Input
+              className="mt-1 h-8"
+              type="number"
+              min={0.01}
+              step={0.01}
+              value={isEditingDuration ? durationMsInput : currentDurationText}
+              onFocus={() => {
+                setIsEditingDuration(true);
+                setDurationMsInput(currentDurationText);
+              }}
+              onChange={(event) => setDurationMsInput(event.target.value)}
+              onBlur={() => commitDurationMs(true)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setDurationMsInput(currentDurationText);
+                  setIsEditingDuration(false);
+                  return;
+                }
+                
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                commitDurationMs(false);
+              }}
+            />
+          </div>
+
+          <div className="px-2">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
               Play Rate
             </span>
             <Input
@@ -79,30 +152,15 @@ export function PropertiesPanel() {
                   type: "UPDATE_EFFECT",
                   index: state.activeEffectIndex,
                   patch: {
-                    playRateHz: Number(event.target.value) || state.globalDefaultPlayRateHz,
+                    playRateHz:
+                      Number(event.target.value) ||
+                      state.globalDefaultPlayRateHz,
                   },
                 })
               }
             />
           </div>
 
-          <div className="px-2">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Global Default Play Rate
-            </span>
-            <Input
-              className="mt-1 h-8"
-              type="number"
-              min={1}
-              value={state.globalDefaultPlayRateHz}
-              onChange={(event) =>
-                dispatch({
-                  type: "SET_GLOBAL_DEFAULT_PLAY_RATE",
-                  playRateHz: Number(event.target.value) || 8000,
-                })
-              }
-            />
-          </div>
 
           <div className="flex items-center justify-between px-2">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -115,7 +173,9 @@ export function PropertiesPanel() {
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
               Length
             </span>
-            <span className="text-xs">{effect.waveform.samples.length} bytes</span>
+            <span className="text-xs">
+              {effect.waveform.samples.length} bytes
+            </span>
           </div>
 
           {meta && (
@@ -203,7 +263,9 @@ export function PropertiesPanel() {
 
           <div className="flex flex-col gap-2 px-2">
             {familyPresets.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No presets saved for this family.</p>
+              <p className="text-xs text-muted-foreground">
+                No presets saved for this family.
+              </p>
             ) : (
               familyPresets.map((preset) => (
                 <div
@@ -246,51 +308,6 @@ export function PropertiesPanel() {
               ))
             )}
           </div>
-
-          <Separator className="my-1" />
-          <div className="px-2">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Transform Chain
-            </span>
-          </div>
-          <div className="px-2">
-            {effect.chain.length === 0 ? (
-              <span className="text-xs text-muted-foreground">Empty</span>
-            ) : (
-              <div className="flex flex-wrap gap-1">
-                {effect.chain.map((step, i) => (
-                  <Badge
-                    key={i}
-                    variant={step.enabled ? "secondary" : "outline"}
-                    className="text-[10px]"
-                  >
-                    {step.type}
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {effect.regions.length > 0 && (
-            <>
-              <Separator className="my-1" />
-              <div className="px-2">
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  Regions ({effect.regions.length})
-                </span>
-              </div>
-              {effect.regions.map((r) => (
-                <div key={r.id} className="flex items-center justify-between px-2">
-                  <span className="text-xs tabular-nums">
-                    {r.name} [{r.start}-{r.end}]
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">
-                    xfade: {r.crossfadeSamples}
-                  </span>
-                </div>
-              ))}
-            </>
-          )}
         </div>
       </ScrollArea>
     </div>
